@@ -208,6 +208,8 @@ class BiLSTM_Model():
     def loss_layer(self, project_logits):
         from tensorflow.contrib.crf import crf_log_likelihood
         with tf.variable_scope("crf_loss"):
+            #trans shape:(6,6) 主要训练标记之间的转移权重，从一个 标记到另一个标记的转移概率。
+            #对一个新的句子，从句首到句尾，动态规划搜索最大概率路径（此处包含了位置信息）
             log_likelihood, trans = crf_log_likelihood(inputs=project_logits, tag_indices=self.y_target,
                                                        transition_params=self.trans, sequence_lengths=self.seqlen)
         return tf.reduce_mean(-log_likelihood)
