@@ -148,6 +148,7 @@ class BiLSTM_Model():
         self.embeddings = tf.get_variable("embeddings",initializer=tf.truncated_normal([vocab_size,embeddings_size],stddev=0.05))
         self.x_input = tf.placeholder(dtype=tf.int32, shape=[None, None], name='x_input')
         self.y_target = tf.placeholder(dtype=tf.int32, shape=[None,None], name='y_target')
+        #句子长度
         self.num_steps = tf.shape(self.x_input)[-1]
         self.seqlen = tf.placeholder(dtype=tf.int32, shape=[None],name='seq_lengths')
 
@@ -174,10 +175,12 @@ class BiLSTM_Model():
         lstm_bw_cell = rnn.GRUCell(self.lstm_dim)
         (outputs, outputs_state) = tf.nn.bidirectional_dynamic_rnn(lstm_fw_cell, lstm_bw_cell,
                                                                    embed_, dtype=tf.float32,sequence_length=self.seqlen)
+        #outputs:[backward,forward] backward(0:batch_size,1:max_time,2:out_size=self.lstm_dim)
         x_in_ = tf.concat(outputs, axis=2)
         #将前向和后向输出拼接起来
         #batch_size, cell_fw.output_size
         # x_in_ = tf.concat(outputs_state, axis=1)
+        #[batch_size,max_time,2*self.lstm_dim]
         return x_in_
     def project_layer(self, x_in_):
         with tf.variable_scope("project"):
@@ -198,18 +201,25 @@ class BiLSTM_Model():
     def project_layer_single(self, x_in_):
         with tf.variable_scope("project"):
             with tf.variable_scope("output"):
+                #w_out，b_out在所有时间t上权重共享
                 w_out = tf.get_variable("w_out", [self.lstm_dim*2, self.num_tags], initializer=self.initializer,
                                         regularizer=tf.contrib.layers.l2_regularizer(0.001))
                 b_out = tf.get_variable("b_out", [self.num_tags], initializer=tf.zeros_initializer())
+                #将输出由[batch_size,max_time,2*self.lstm_dim]reshape成[batch_size*max_time,2*self.lstm_dim]
                 x_in_ = tf.reshape(x_in_, [-1, self.lstm_dim * 2])
                 pred_ = tf.add(tf.matmul(x_in_, w_out), b_out)
+                #self.num_steps==max_time
                 logits_ = tf.reshape(pred_, [-1, self.num_steps,self.num_tags], name='logits')
         return logits_
     def loss_layer(self, project_logits):
         from tensorflow.contrib.crf import crf_log_likelihood
         with tf.variable_scope("crf_loss"):
-            #trans shape:(6,6) 主要训练标记之间的转移权重，从一个 标记到另一个标记的转移概率。
-            #对一个新的句子，从句首到句尾，动态规划搜索最大概率路径（此处包含了位置信息）
+            '''
+            trans shape:(6,6) 主要训练标记之间的转移权重，从一个 标记到另一个标记的转移概率。
+            此处与传统crf不一样，传统crf每个位置转移矩阵不一样
+            对一个新的句子，从句首到句尾，动态规划搜索最大概率路径（此处包含了位置信息）
+            '''
+
             log_likelihood, trans = crf_log_likelihood(inputs=project_logits, tag_indices=self.y_target,
                                                        transition_params=self.trans, sequence_lengths=self.seqlen)
         return tf.reduce_mean(-log_likelihood)
